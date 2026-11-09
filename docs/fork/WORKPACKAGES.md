@@ -37,6 +37,8 @@ STATUS.md**（真机步骤可以等主人来跑）。
     （`--json` 的行为保持不变）。
   - 新增 `cli/domains/inbox.py`。
   - 新增 `infra/locks.py`：引擎文件锁和重型求解信号量。
+  - `.gitignore` 加上 `.rfauto/`。收件箱、游标、锁、hook 状态都是本机运行状态，不进仓库；
+    现在 `.gitignore` 只忽略了 `.rfauto_cache/`，没有忽略 `.rfauto/`。
   - campaign executor 在每个条目开始、结束时发出 `PROGRESS` 事件
     （先确认现有代码是否已经发出，已有就复用）。
 - Linux 验收：
