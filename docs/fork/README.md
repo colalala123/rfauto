@@ -9,12 +9,12 @@
 让 AI 帮工程师盯住射频仿真里重复的活，并能接上 AI 做优化：
 
 1. **三家引擎都能驱动**：ADS 2027、HFSS 2024 R2、CST Studio Suite 2024，都装在同一台 Windows 机器上。
-2. **HFSS ↔ CST 联调**，以介质滤波器为第一个场景。流程是：CST 里定结构和指标，
-   得到理想耦合矩阵；HFSS 把同一结构画出来仿真；用仿真曲线反提耦合矩阵；
-   再和 CST 的理想矩阵对比。详见 [`COSIM_DR_FILTER.md`](COSIM_DR_FILTER.md)。
+2. **HFSS ↔ CST 联调**，第一个场景是**腔体介质滤波器**（4 阶和 8 阶，有传输零点和交叉耦合）。
+   流程是：CST 里定结构和指标，得到理想耦合矩阵；HFSS 把同一结构画出来仿真；
+   用仿真曲线反提耦合矩阵；再和 CST 的理想矩阵对比。详见 [`COSIM_DR_FILTER.md`](COSIM_DR_FILTER.md)。
 3. **任务完成主动通知 AI**：单次仿真跑完会通知 AI；批量仿真能看到进度条，整批跑完
-   也会通知 AI。通知机制**不绑定某一家 AI**，Claude Code、Codex、dsh 都要能用。
-   安装时自动跑自检，证明 hook 真的通了。详见 [`HOOKS_SPEC.md`](HOOKS_SPEC.md)。
+   也会通知 AI。通知机制**不绑定某一家 AI**，Claude Code、Codex、dsh（DeepSeek Harness）
+   都要能用。安装时自动跑自检，证明 hook 真的通了。详见 [`HOOKS_SPEC.md`](HOOKS_SPEC.md)。
 4. 暂不做：推送到手机（飞书 / webhook 等外部推送）。上游已有的
    `campaign_notify_service` 保持原样，不扩展。
 
@@ -27,7 +27,7 @@
 | ADS 2027 | `linkage/ads_mcp_channel.py`（ADS 2027 官方 `bin/ads-mcp.exe`，M 档）、`ads_batch.py`（B 档 hpeesofsim） | 上游已在 ADS 2027 上冒烟通过；生产默认走 B 档，M 档显式启用 |
 | 两阶段联动范式 | `linkage/hfss_ads_link.py` | `hfss_cst_link` 照这个结构写 |
 | 耦合矩阵综合 | `core/calc_families/cm_core.py`（广义切比雪夫，Cameron N+2，folded/arrow 约简） | 用来独立复核 CST 给的理想矩阵 |
-| 耦合矩阵反提 | `core/calc_families/cm_extract.py`（Cauchy 拟合 + Cameron Y 留数；支持 complex / magnitude 两个域，以及参考时延扫描） | HFSS 曲线反提的内核。**已知有精度地板，见 COSIM 文档 §5** |
+| 耦合矩阵反提 | `core/calc_families/cm_extract.py`（Cauchy 拟合 + Cameron Y 留数；complex 域支持非对称传输零点；magnitude 域只适用于对称响应）；`cm_diag.py`（`cm_refine_lm`：以给定矩阵为初值做 LM 精修，支持有耗；`cm_extract_vf`：矢量拟合路线） | HFSS 曲线反提的内核。**拓扑和阶数的覆盖范围不够，见 COSIM 文档 §5** |
 | TE01δ 介质谐振器 | `core/calc_families/dr_te01d.py` | 用于初值和合理性检查 |
 | 事件总线 | `core/events.py`（每个 run 写 `events.jsonl`，有 `RUN_COMPLETED`、`TRIAL_*`、`PROGRESS`、`LICENSE_WAIT` 等事件） | 通知机制的唯一数据源 |
 | 异步任务 | `mcp_tools/jobs.py`（`create_run_async`/`poll_job`/`wait_job`）、`cli/domains/jobs.py`（`jobs status/cancel/watch`，`meta.json` 落盘） | 在这上面扩展，不重写 |
@@ -57,7 +57,7 @@
                                                  ▲
      campaign / run / tune ──→ adapters：fake │ hfss(2024R2) │ cst(2024, worker 子进程) │ ads(2027)
                                                  ▲
-                         linkage/hfss_cst_link（介质滤波器联调）
+                         linkage/hfss_cst_link（腔体介质滤波器联调）
 ```
 
 ## 5. 工作包与顺序
@@ -65,24 +65,32 @@
 详见 [`WORKPACKAGES.md`](WORKPACKAGES.md)。依赖关系：
 
 ```
-WP0 基线 ─┬─→ WP1 任务层 ──→ WP2 通知/hook + 安装自检 ─────────────┐
-          ├─→ WP3 CST adapter ──┐                                   │
-          ├─→ WP4 HFSS 2024R2 + STEP 导入 ─┴─→ WP5 介质滤波器联调 ─┴─→ WP7 AI 调谐闭环
+WP0 基线 ─┬─→ WP1 任务层 ──→ WP2 通知/hook + 安装自检 ──────────────────────┐
+          ├─→ WP5a 反提内核补强（纯 Linux）────────────┐                     │
+          ├─→ WP3 CST adapter ─────────────────────────┤                     │
+          ├─→ WP4 HFSS 2024R2 + STEP 导入 ─────────────┴─→ WP5b 联调流水线 ─┴─→ WP7 AI 调谐闭环
           └─→ WP6 ADS 2027 通道核实（独立，可随时做）
 ```
 
-WP2 是仓库主人点名的优先项。WP3 和 WP4 可以并行。
+WP2 是仓库主人点名的优先项。WP3、WP4、WP5a 可以并行。WP5a 不需要任何引擎，
+也不需要等样例文件，可以马上开工。
 
-## 6. 需要仓库主人确认的事项
+## 6. 已确认的事项（2026-11-09，仓库主人答复）
 
-这些问题没有确定前，相关 WP 会先做到"可插拔、可用 fake 测试"为止。
+1. **滤波器形式**：腔体（金属腔体内装介质谐振器）。有 **4 阶和 8 阶**两种，
+   **有传输零点，也有交叉耦合**。
+2. **理想矩阵来源**：CST Filter Designer 3D。可以导出 `.fil` 文件，整个理想矩阵
+   也能读取并单独导出。
+3. **dsh = DeepSeek Harness**（`deepseek-ai/deepseek-harness`，MIT，开发者预览版）。
+   它自带实验性的 Claude Code / Codex hook 兼容桥，适配方案见 HOOKS_SPEC §4.3。
+4. 三家引擎在同一台 Windows 机器上：ADS 2027、HFSS 2024 R2、CST 2024。
 
-1. **介质滤波器的具体形式**：是一体化陶瓷（monoblock，银层 + 盲孔谐振 + 调谐孔），
-   还是腔体里的 TE01δ 介质谐振器，或者其它形式？阶数大概多少，有没有交叉耦合 / 传输零点？
-   这决定 HFSS 几何模板和端口怎么设。
-2. **CST 的"理想耦合矩阵"从哪来**：是 CST Filter Designer 3D 综合出来的吗？
-   能否导出成文件（格式是什么）？WP3 有一个专门的 spike 去确认能否用程序拿到。
-3. **dsh 是什么**：它的 hook / 插件机制、配置文件位置、调用外部命令的方式是什么？
-   在弄清之前，WP2 先只给它做"通用适配器"（纯命令行 + 文本输出）。
-4. 本机的安装路径：分别填进 `RFAUTO_CST_DIR`、`ANSYSEM_ROOT242`（AEDT 2024 R2 的
-   惯例变量）、`RFAUTO_HPEESOF_DIR`。这些值不进仓库，只写进本机环境变量。
+## 7. 仍待仓库主人提供
+
+1. **样例文件**（WP3 解析器、WP5a 标定都要用）：分别用一个**专门做的示例设计**
+   （不是真实产品，因为仓库公开）导出 4 阶、8 阶各一套：`.fil` 文件和单独导出的
+   理想矩阵文件，放进 `tests/fixtures/cst/`。最好能带上 CST 里对应的理想响应曲线导出。
+2. 谐振模式：TE01δ 还是 TM 模或其它？只影响初值估算和报告说明，不影响主流程。
+3. 本机安装路径写进环境变量（不进仓库）：`RFAUTO_CST_DIR`、`ANSYSEM_ROOT242`
+   （AEDT 2024 R2 的惯例变量）、`RFAUTO_HPEESOF_DIR`。
+4. 本机 Codex 和 dsh 的版本，以及 dsh 启动时使用的 `cordis.yml` 在哪里（WP2 安装器要往里加 hook 桥）。

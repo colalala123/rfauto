@@ -49,24 +49,27 @@ STATUS.md**（真机步骤可以等主人来跑）。
 
 ## WP2 · agent hook + 安装自检（HOOKS_SPEC §4、§5）—— 优先项
 
-**目标**：Claude Code、Codex、dsh（先用通用适配器）都能在任务结束时得知结果；
-安装时自动证明 hook 通了。
+**目标**：Claude Code、Codex、dsh（DeepSeek Harness，走它的 Claude Code 兼容桥）都能在
+任务结束时得知结果；安装时自动证明 hook 通了。
 
 - 改动：
-  - 新增 `service/agent_hooks/{base,claude,codex,generic}.py`。
+  - 新增 `service/agent_hooks/{base,claude,codex,dsh,generic}.py`。dsh 适配器复用 claude 的
+    配置格式和渲染，只负责往 dsh 的 `cordis.yml` 挂兼容桥（HOOKS_SPEC §4.3）。
   - 新增 `cli/domains/hooks.py`（`emit`、`install`、`uninstall`、`selftest`）。
   - 扩展 `mcp_tools/jobs.py`：`wait_job` 上报进度；新增 `inbox_list`、`inbox_ack` 和
     resource（按 AGENTS.md §2 同步 README 计数）。
   - AGENTS.md 加一节「提交仿真后怎么等」：L1 的具体用法。
 - Linux 验收：
-  - selftest 的 T1–T6 在 CI 上通过（使用伪造的 `HOME` 和配置目录）。
+  - selftest 的 T1–T6、T8 在 CI 上通过（使用伪造的 `HOME` 和配置目录）。
   - install 是幂等的：重复安装不会产生重复的 hook 条目；用户原有配置不被破坏
     （测试：先写入一个带其它 hook 的 settings.json，安装后再卸载，文件和原来逐字节一致）。
-  - `emit` 在各种异常情况下都以 0 退出（T6）。
+    Codex 的 hooks.json、dsh 的 cordis.yml 做同样的测试；dsh 安装后 `configPath` 必须是绝对路径。
+  - `emit` 在各种异常情况下都以 0 退出（T6），且 5 秒内返回。
 - 真机验证（**每种 AI 都要做**）：
-  - `rfauto hooks install --agent claude` → 输出 selftest 表，T1–T6 PASS。
+  - `rfauto hooks install --agent claude` → 输出 selftest 表，T1–T6、T8 PASS。
   - `rfauto hooks selftest --agent claude --live` → T7 PASS（或者写明 SKIP 的原因）。
-  - Codex 同样做一遍；如果 Codex 没有入站 hook，报告里要如实写明退化方式。
+  - Codex、dsh 各做一遍。Codex 注意项目信任设置；dsh 安装后要先重启再跑 T7。
+    记录各自的版本号（dsh 处于开发者预览阶段，版本变化可能导致兼容桥失效）。
   - 实际体验一次：让 AI 提交一个 fake campaign，然后什么也不说，确认 AI 在任务结束后
     主动汇报了结果。
 
@@ -83,21 +86,26 @@ STATUS.md**（真机步骤可以等主人来跑）。
     - `adapter.py`：实现 `EMSolverAdapter`，并在 `EMSolverType` 和注册表中登记 `cst`。
     - `protocol.py`：RPC 的消息 schema。
     - `fake_worker.py`：用于测试的假 worker（返回固定的 S 参数）。
+    - `fil_parser.py`：解析 `.fil` 和单独导出的理想矩阵文件，转换成 rfauto 的 N+2 约定，
+      并记录归一化方式、符号约定和拓扑掩码（COSIM §4）。**样例到位之前不写。**
+      这是纯 Python，放在主进程，不需要 CST。
   - 用到的 RPC 方法：`open_project`、`list_parameters`、`set_parameters`（之后重建模型）、
     `run_solver(kind=time|frequency)`、`get_sparams`、`export_touchstone`、
-    `export_step(+sidecar)`、`get_ideal_coupling_matrix`、`close`。
+    `export_step(+sidecar)`、`get_ideal_coupling_matrix`（可选，见 spike 第 2 条）、`close`。
   - `pyproject.toml` 增加 `cst` extra（如果需要第三方依赖的话）。
 - **spike（先做，写成报告放进 STATUS.md）**：
   1. CST 2024 的 Python 库位于 `<CST安装目录>/AMD64/python_cst_libraries`。确认它支持哪些
      Python 版本，能否直接使用 rfauto 的 venv（3.10–3.12）。不行的话，worker 改用 CST
      兼容的解释器启动（用 `RFAUTO_CST_PYTHON` 指定）。
-  2. Filter Designer 3D 的耦合矩阵能否用程序读出（参见 COSIM §4）。
+  2. 文件导出已确认可行（`.fil` 和单独的矩阵文件）。spike 只需确认：理想矩阵能不能直接用
+     API 或 VBA 读出，用来和文件解析结果互相核对。读不出来也不影响主流程。
   3. 导出 STEP 时实体名和材料信息是否保留。
 - Linux 验收：
   - 基于 fake_worker 的 adapter 单元测试：完整生命周期、worker 崩溃时的报错、超时、
     重复 close。
   - RPC schema 有测试。
-  - 理想矩阵解析器使用 `tests/fixtures/cst/` 里的样例做测试（样例由真机 spike 产出）。
+  - `fil_parser` 用 `tests/fixtures/cst/` 里的 4 阶、8 阶样例做测试：矩阵、归一化、符号、
+    拓扑掩码都正确；`.fil` 和单独导出的矩阵文件解析结果一致；坏文件给出明确报错。
 - 真机验证：拿一个简单的 CST 工程（比如两个耦合谐振器）：改参数 → 时域求解 → 导出的 S
   参数和在 GUI 中手动导出的逐点一致（容差 1e-6）。
 
@@ -116,24 +124,48 @@ STATUS.md**（真机步骤可以等主人来跑）。
 - 真机验证：用 WP3 那个两谐振器工程导出 → 导入 HFSS → 求解 → 与 CST 的 S 参数在通带内
   逐点比较（先只记录差值，不设门限）。
 
-## WP5 · 介质滤波器联调流水线（COSIM 全文）
+## WP5a · 反提内核补强（纯 Linux，可立即开工）
 
-**前置**：WP3、WP4 完成；仓库主人已确认滤波器形式（README §6 第 1 条）。
+**目标**：反提链在"4 阶 / 8 阶 + 非对称传输零点 + 交叉耦合"的条件下可靠，并给出 G4 阈值的
+标定来源（COSIM §5）。不需要任何引擎，也不需要等样例文件（先用合成拓扑，样例到了再补）。
+
+- 改动（优先放新模块，例如 `core/calc_families/cm_phase_loading.py`、`cm_topology.py`，
+  以及 `service/cm_compare_service.py`）：
+  1. 相位加载去除内核，登记出处。
+  2. 任意拓扑矩阵 → transversal → folded 标准型的统一函数（复用 `cm_core` 的约简），
+     以及统一的符号约定。
+  3. `cm_refine_lm` 支持 `topology="mask"`（支撑集取初值矩阵的非零模式）。尽量在新模块里
+     包装；必须改上游函数时，提交信息写 `upstream-touch`。
+  4. 解多重性检测（多起点精修，比较残差和解之间的距离）。
+  5. round-trip 标定脚本，结果写入 `knowledge/cm_extract_floor.yaml`。
+- Linux 验收：
+  - 合成用例至少包括：4 阶 CQ（一个交叉耦合、非对称传输零点）；8 阶、两个以上交叉耦合、
+    非对称传输零点。样例到位后加上样例里的真实拓扑。
+  - 无噪声 round-trip：反提结果和原矩阵的差接近数值精度（容差参照上游
+    `tests/unit/test_coupling_matrix.py` 复往返用例的量级）。
+  - 加入已知相位加载后再去除：结果和无相位加载时一致（容差同上）。
+  - 两条路线（Cauchy → folded，掩码 LM → folded）结果一致。
+  - 加噪声：给出 |ΔM| 随噪声水平、频点数变化的误差地板，写入 knowledge。
+  - 多解检测：多起点得到互不相同但残差相当的解时，必须报"解不唯一"。可以用文献中已知
+    多解的拓扑（例如 Cameron 书中讨论的 extended box，实施者核对）构造用例。
+  - 8 阶用例记录 Cauchy 拟合的条件数。**如果 8 阶过不了，如实写 FAIL 和原因，不准放宽阈值。**
+
+## WP5b · 联调流水线（接引擎）
+
+**前置**：WP3、WP4、WP5a 完成；样例文件已提供（README §7 第 1 条）。
 
 - 改动：
-  - 新增 `linkage/hfss_cst_link.py`（阶段 S0–S5）。
-  - 新增 `service/cm_compare_service.py`、相位加载去除内核、G1–G4 门。
-  - round-trip 标定脚本，结果写入 `knowledge/cm_extract_floor.yaml`。
+  - 新增 `linkage/hfss_cst_link.py`（COSIM §2 的阶段 S0–S5）。
+  - 新增 G1–G4 门；G4 阈值引用 `knowledge/cm_extract_floor.yaml`。
   - 新增 CLI `rfauto cosim dr-filter <recipe>`，以 job 形式运行（自动获得进度和通知）。
-  - 新增配方 `recipes/dr_filter_*.yaml`。
-  - 报告：矩阵对照表、|ΔM| 热力图、偏差来源诊断（COSIM §6）。
+  - 新增配方 `recipes/dr_filter_*.yaml`（只放示例设计）。
+  - 报告：矩阵对照表、|ΔM| 热力图、解多重性提示、偏差来源诊断（COSIM §6）。
 - Linux 验收：
-  - 整条流水线用 fake 的 CST 和 HFSS 跑通（fake 返回由 `M_ideal` 计算出的理想响应），
-    此时 G4 必须 PASS。
+  - 整条流水线用 fake 的 CST 和 HFSS 跑通（fake 返回由 `M_ideal` 计算出的理想响应，
+    并加上已知相位加载），此时 G4 必须 PASS。
   - 人为给某个耦合加 5% 误差，G4 必须 FAIL，并在偏差最大的条目中准确指出这个元素。
-  - round-trip 标定可以复现。
-- 真机验证：在仓库主人的第一个介质滤波器工程上端到端跑一次，把报告和四种对比
-  （COSIM §6）的数值写进 STATUS.md。
+- 真机验证：在示例设计（4 阶、8 阶各一）上端到端跑一次，把报告和四种对比（COSIM §6）
+  的数值写进 STATUS.md。真实产品工程由仓库主人在本机自行运行，结果不进仓库。
 
 ## WP6 · ADS 2027 通道核实（独立）
 
@@ -146,13 +178,14 @@ STATUS.md**（真机步骤可以等主人来跑）。
   - 结果写进 `compat_matrix.yaml`。如果 M 档已足够可靠，再讨论是否改成默认（需要仓库主人同意）。
 - 真机验证：同一个 ADS 网表，M 档和 B 档的结果逐点一致。
 
-## WP7 · AI 调谐闭环（介质滤波器）
+## WP7 · AI 调谐闭环（腔体介质滤波器）
 
-**前置**：WP5。
+**前置**：WP5b。
 
 - 改动：
-  - 新增 `optimization/cm_space_mapping.py`：用有限差分估计雅可比 ∂M/∂dims，然后做
-    Newton 或阻尼最小二乘迭代。物理映射来自模板元数据。
+  - 新增 `optimization/cm_space_mapping.py`：用有限差分估计雅可比 ∂M/∂参数，然后做
+    Newton 或阻尼最小二乘迭代。物理映射来自映射文件（路线 G）或模板元数据（路线 P），
+    见 COSIM §7。
   - 以 campaign 的形式运行，每一轮是一个 job，自动带进度和通知。
   - MCP / CLI：`rfauto cosim dr-filter tune <recipe> --max-iter N`。
   - AI 的职责：读每轮的通知 → 决定继续、调整步长阻尼或停止 → 生成说明。

@@ -33,6 +33,9 @@
    Python 库 import 进 rfauto 主进程。
 8. **零敏感**：不提交许可证文件、license server 地址、API key、本机绝对路径。
    本机路径一律走环境变量（`RFAUTO_*`），在 `docs/env_vars.md` 登记。
+   **本 fork 是公开仓库**（公开仓库的 fork 默认公开），所以也**不得提交真实产品设计数据**：
+   CST/HFSS 工程、`.fil` 文件、真实耦合矩阵、仿真或实测 S 参数都不行。
+   测试样例一律用专门做的示例设计（dummy）。
 9. **Windows 纪律**（HFSS/CST 真机）：工程目录、输出目录、日志一律 ASCII 绝对路径；
    同一 AEDT Desktop 只建一个 Hfss 实例；一次失败赋值即整轮重建会话，绝不带毒续跑。
    详见 `docs/unattended_hfss_automation.md`。
