@@ -47,31 +47,53 @@ STATUS.md**（真机步骤可以等主人来跑）。
 - 真机验证：用 fake 跑一个 20 点的 campaign，在另一个终端运行 `rfauto jobs watch`，
   确认进度条正常（附截图或终端输出）。
 
-## WP2 · agent hook + 安装自检（HOOKS_SPEC §4、§5）—— 优先项
+## WP2a · 通知层公共部分 + Codex 适配（第一阶段的终点，由 Codex 自己完成）
 
-**目标**：Claude Code、Codex、dsh（DeepSeek Harness，走它的 Claude Code 兼容桥）都能在
-任务结束时得知结果；安装时自动证明 hook 通了。
+**目标**：Codex 提交的仿真跑完后，Codex 自己能知道结果；安装时自动证明 hook 通了。
+
+**由 Codex 自己实现、自己核实。** Codex 最清楚自己的 hook 机制。HOOKS_SPEC §4.2 里的信息
+只是起点，一律以本机 Codex 版本的官方文档和实测为准；发现不一致就以核实结果为准，
+并回写 HOOKS_SPEC §4.2。
 
 - 改动：
-  - 新增 `service/agent_hooks/{base,claude,codex,dsh,generic}.py`。dsh 适配器复用 claude 的
-    配置格式和渲染，只负责往 dsh 的 `cordis.yml` 挂兼容桥（HOOKS_SPEC §4.3）。
+  - 新增 `service/agent_hooks/base.py`：适配器接口、游标与 ack、安装记录（用于卸载和回滚）、
+    selftest 框架（T1–T8）。后面的 Claude Code、dsh 适配器都复用它。
+  - 新增 `service/agent_hooks/codex.py`：写 Codex 的 hook 配置，`render` 输出 JSON `additionalContext`。
+  - 新增 `service/agent_hooks/generic.py`：通用适配器（HOOKS_SPEC §4.4）。
   - 新增 `cli/domains/hooks.py`（`emit`、`install`、`uninstall`、`selftest`）。
   - 扩展 `mcp_tools/jobs.py`：`wait_job` 上报进度；新增 `inbox_list`、`inbox_ack` 和
     resource（按 AGENTS.md §2 同步 README 计数）。
-  - AGENTS.md 加一节「提交仿真后怎么等」：L1 的具体用法。
+  - AGENTS.md 加一节「提交仿真后怎么等」：L1 的具体用法（Codex 用 `jobs wait --timeout 540` 循环等）。
 - Linux 验收：
   - selftest 的 T1–T6、T8 在 CI 上通过（使用伪造的 `HOME` 和配置目录）。
   - install 是幂等的：重复安装不会产生重复的 hook 条目；用户原有配置不被破坏
-    （测试：先写入一个带其它 hook 的 settings.json，安装后再卸载，文件和原来逐字节一致）。
-    Codex 的 hooks.json、dsh 的 cordis.yml 做同样的测试；dsh 安装后 `configPath` 必须是绝对路径。
+    （测试：先写入一个带其它 hook 的 Codex 配置，安装后再卸载，文件和原来逐字节一致）。
   - `emit` 在各种异常情况下都以 0 退出（T6），且 5 秒内返回。
-- 真机验证（**每种 AI 都要做**）：
-  - `rfauto hooks install --agent claude` → 输出 selftest 表，T1–T6、T8 PASS。
-  - `rfauto hooks selftest --agent claude --live` → T7 PASS（或者写明 SKIP 的原因）。
-  - Codex、dsh 各做一遍。Codex 注意项目信任设置；dsh 安装后要先重启再跑 T7。
-    记录各自的版本号（dsh 处于开发者预览阶段，版本变化可能导致兼容桥失效）。
-  - 实际体验一次：让 AI 提交一个 fake campaign，然后什么也不说，确认 AI 在任务结束后
-    主动汇报了结果。
+- 真机验证（Windows，本机 Codex）：
+  - `rfauto hooks install --agent codex` → 输出 selftest 表，T1–T6、T8 PASS。注意 Codex 的项目信任设置。
+  - `rfauto hooks selftest --agent codex --live` → T7 PASS（或者写明 SKIP 的原因）。
+  - 记录 Codex 版本号，以及核实后和 HOOKS_SPEC §4.2 不一致的地方。
+  - 实际体验一次：让 Codex 提交一个 fake campaign，然后什么也不说，确认它在任务结束后汇报了
+    结果。如实记录通知是从哪条路到达的：L1 等待返回、Stop hook 拦下后去等待，还是下一次提问时
+    由 UserPromptSubmit 注入。
+
+## WP2b · Claude Code 适配
+
+**前置**：WP2a。
+
+- 改动：新增 `service/agent_hooks/claude.py`（HOOKS_SPEC §4.1），复用 WP2a 的公共部分。
+- Linux 验收：同 WP2a，针对 `.claude/settings.json`。
+- 真机验证：`rfauto hooks install --agent claude` → T1–T6、T8 PASS；`--live` 跑 T7；记录 Claude Code 版本。
+
+## WP2c · dsh 适配（以后再做）
+
+**仓库主人 2026-11-09 决定以后再做。** dsh 处于开发者预览阶段，变化快，动手前先重新核实它的
+版本和兼容桥文档（HOOKS_SPEC §4.3 记录的是 2026-11-04 的状态）。
+
+- 改动：新增 `service/agent_hooks/dsh.py`，复用 WP2b 的 Claude Code 格式配置，只负责往 dsh 的
+  `cordis.yml` 挂兼容桥。
+- Linux 验收：对伪造的 `cordis.yml` 做幂等安装、卸载测试；`configPath` 必须是绝对路径。
+- 真机验证：安装 → 重启 dsh → T1–T8；记录 dsh 版本。
 
 ## WP3 · CST 2024 adapter
 
@@ -180,7 +202,7 @@ STATUS.md**（真机步骤可以等主人来跑）。
 
 ## WP7 · AI 调谐闭环（腔体介质滤波器）
 
-**前置**：WP5b。
+**前置**：WP5b、WP2a（调谐的每一轮都靠任务通知推动）。
 
 - 改动：
   - 新增 `optimization/cm_space_mapping.py`：用有限差分估计雅可比 ∂M/∂参数，然后做

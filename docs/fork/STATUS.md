@@ -7,7 +7,9 @@
 |---|---|---|---|
 | WP0 | 基线与环境探测 | — | TODO |
 | WP1 | 统一任务层 | WP0 | TODO |
-| WP2 | agent hook + 安装自检（优先） | WP1 | TODO |
+| WP2a | 通知层公共部分 + Codex 适配（第一阶段终点，由 Codex 自己做） | WP1 | TODO |
+| WP2b | Claude Code 适配 | WP2a | TODO |
+| WP2c | dsh 适配 | WP2b | 以后再做（仓库主人决定） |
 | WP3 | CST 2024 adapter | WP0；`fil_parser` 部分要等样例 | TODO |
 | WP4 | HFSS 2024 R2 + STEP 导入 | WP0 | TODO |
 | WP5a | 反提内核补强（纯 Linux） | WP0 | TODO（可立即开工，先用合成拓扑） |
@@ -21,6 +23,7 @@
 - [x] 理想矩阵来源：CST Filter Designer 3D，可导出 `.fil`，整个理想矩阵也能读取并单独导出
 - [x] dsh = DeepSeek Harness（hook 适配方案见 HOOKS_SPEC §4.3）
 - [x] 引擎版本：ADS 2027、HFSS 2024 R2、CST 2024，同一台 Windows 机器
+- [x] 优先级：第一步让 Codex 自己完成自己的 hook 适配（WP0 → WP1 → WP2a）；dsh 以后再做
 
 ## 仍待仓库主人提供（见 README §7）
 
@@ -28,11 +31,16 @@
       放进 `tests/fixtures/cst/`；最好附 CST 的理想响应曲线导出
 - [ ] 谐振模式（TE01δ / TM 模 / 其它）
 - [ ] 本机三家引擎的安装路径写入环境变量（不进仓库）
-- [ ] 本机 Codex、dsh 的版本，以及 dsh 使用的 `cordis.yml` 位置
+- [ ] （做 WP2c 时再说）dsh 的版本和 `cordis.yml` 位置
 
 ## 日志
 
 <!-- 按时间倒序追加。每条：日期 / WP / 执行者 / 做了什么 / 验收结果 / 遗留问题 -->
+
+- 2026-11-09 / 方案修订 / Claude（云端）/ 按仓库主人决定调整优先级：WP2 拆成 WP2a（通知层公共
+  部分 + Codex 适配，由 Codex 自己实现和核实，作为第一阶段终点）、WP2b（Claude Code）、
+  WP2c（dsh，以后再做）；README §5 改成按阶段列出依赖；WP7 前置补上 WP2a。
+  `main` 快进到本分支。未改动任何代码，也未运行测试。
 
 - 2026-11-09 / 方案修订 / Claude（云端）/ 根据仓库主人答复更新方案：联调场景改为腔体介质
   滤波器（4、8 阶，有传输零点和交叉耦合）；反提改为 complex 域 + 相位加载去除 + folded

@@ -1,4 +1,4 @@
-# 任务通知与 agent hook 规范（WP1 + WP2）
+# 任务通知与 agent hook 规范（WP1 + WP2a/2b/2c）
 
 目标：rfauto 里的一个仿真任务（单次 run 或一批 campaign）结束后，正在使用本仓库的
 AI 能**自己知道**，不需要人去提醒它。批量任务进行中，人和 AI 都能看到进度。
@@ -67,7 +67,7 @@ AI 能**自己知道**，不需要人去提醒它。批量任务进行中，人�
   同一会话不重复投递；新会话会收到「未 ack 的全部」。
 - `rfauto inbox ack <job_id|--all>` 手动确认已处理；AI 处理完一条就应该 ack。
 
-## 3. CLI 契约（WP1 + WP2 产出）
+## 3. CLI 契约（WP1 + WP2a 产出）
 
 | 命令 | 行为 | 退出码 |
 |---|---|---|
@@ -95,6 +95,9 @@ class AgentHookAdapter(Protocol):
     def sample_stdin(self, event) -> str                    # 自检用：模拟该 AI 调用 hook 时的 stdin
 ```
 
+**实施顺序**（仓库主人 2026-11-09 决定）：先 Codex（WP2a，由 Codex 自己实现和核实），
+再 Claude Code（WP2b），dsh 以后再做（WP2c）。
+
 ### 4.1 Claude Code
 
 - 配置位置：`.claude/settings.json`（project 作用域）或 `~/.claude/settings.json`（user 作用域），
@@ -116,10 +119,12 @@ class AgentHookAdapter(Protocol):
 
 ### 4.2 Codex
 
-Codex 有自己的 hook 机制。下面的信息来自 dsh 的 Codex 兼容桥文档
-（`deepseek-ai/deepseek-harness` 仓库 `packages/experimental/hooks-codex/README.md`，2026-11 版），
-那份文档逐条对照了 Codex 当时的 hook 协议。**实施前仍须对照本机 Codex 版本的官方 hook
-文档核实**（dsh 文档引用的地址是 `https://learn.chatgpt.com/docs/hooks`），并把核实结果写进适配器注释。
+**这一节由 Codex 自己实现和核实（WP2a）。** Codex 最了解自己的 hook 机制，下面的信息只是起点。
+它们来自 dsh 的 Codex 兼容桥文档（`deepseek-ai/deepseek-harness` 仓库
+`packages/experimental/hooks-codex/README.md`，2026-11 版），那份文档逐条对照了 Codex 当时的
+hook 协议。实施时一律以本机 Codex 版本的官方 hook 文档（dsh 文档引用的地址是
+`https://learn.chatgpt.com/docs/hooks`）和实测结果为准；发现不一致就以核实结果为准，
+**回写本节**，并写进适配器注释。
 
 - 事件（10 个）：`SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、
   `PermissionRequest`、`PreCompact`、`PostCompact`、`SubagentStart`、`SubagentStop`。
@@ -137,7 +142,9 @@ Codex 有自己的 hook 机制。下面的信息来自 dsh 的 Codex 兼容桥�
 - 兜底照样保留：`AGENTS.md` 写死「开工先跑 `rfauto inbox --unread`」，以及 L1 阻塞等待。
   Codex 跑长命令可能有超时，所以用 `jobs wait --timeout 540` 循环调用，靠退出码 3 判断是否继续等。
 
-### 4.3 dsh（DeepSeek Harness）
+### 4.3 dsh（DeepSeek Harness）——以后再做（WP2c）
+
+仓库主人 2026-11-09 决定先做 Codex，dsh 以后再做。下面是当时核实的资料，动手前要重新核实。
 
 已核实的情况（`deepseek-ai/deepseek-harness`，2026-11-04 的提交，CLI 版本 `0.2.2-rc.1`；
 官方声明处于开发者预览阶段，**会有不兼容变更**）：

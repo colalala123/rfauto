@@ -14,7 +14,8 @@
    用仿真曲线反提耦合矩阵；再和 CST 的理想矩阵对比。详见 [`COSIM_DR_FILTER.md`](COSIM_DR_FILTER.md)。
 3. **任务完成主动通知 AI**：单次仿真跑完会通知 AI；批量仿真能看到进度条，整批跑完
    也会通知 AI。通知机制**不绑定某一家 AI**，Claude Code、Codex、dsh（DeepSeek Harness）
-   都要能用。安装时自动跑自检，证明 hook 真的通了。详见 [`HOOKS_SPEC.md`](HOOKS_SPEC.md)。
+   都要能用。**先做 Codex**，由 Codex 自己完成自己的适配；再做 Claude Code；dsh 以后再做。
+   安装时自动跑自检，证明 hook 真的通了。详见 [`HOOKS_SPEC.md`](HOOKS_SPEC.md)。
 4. 暂不做：推送到手机（飞书 / webhook 等外部推送）。上游已有的
    `campaign_notify_service` 保持原样，不扩展。
 
@@ -64,16 +65,17 @@
 
 详见 [`WORKPACKAGES.md`](WORKPACKAGES.md)。依赖关系：
 
-```
-WP0 基线 ─┬─→ WP1 任务层 ──→ WP2 通知/hook + 安装自检 ──────────────────────┐
-          ├─→ WP5a 反提内核补强（纯 Linux）────────────┐                     │
-          ├─→ WP3 CST adapter ─────────────────────────┤                     │
-          ├─→ WP4 HFSS 2024R2 + STEP 导入 ─────────────┴─→ WP5b 联调流水线 ─┴─→ WP7 AI 调谐闭环
-          └─→ WP6 ADS 2027 通道核实（独立，可随时做）
-```
+| 阶段 | 工作包 | 依赖 |
+|---|---|---|
+| **第一阶段：Codex 自己完成自己的适配** | WP0 基线 → WP1 任务层 → WP2a 通知层 + Codex 适配 | 依次进行 |
+| 可与第一阶段并行 | WP5a 反提内核补强（纯 Linux）、WP3 CST adapter、WP4 HFSS 2024 R2 + STEP 导入、WP6 ADS 2027 通道核实 | 都只依赖 WP0 |
+| 之后 | WP2b Claude Code 适配 | WP2a |
+| 之后 | WP5b 联调流水线 | WP3、WP4、WP5a、样例文件 |
+| 之后 | WP7 AI 调谐闭环 | WP5b、WP2a |
+| 以后再做 | WP2c dsh 适配 | WP2b |
 
-WP2 是仓库主人点名的优先项。WP3、WP4、WP5a 可以并行。WP5a 不需要任何引擎，
-也不需要等样例文件，可以马上开工。
+第一阶段做完，Codex 提交的仿真跑完后它自己就能知道结果。hook 得有东西可报，所以任务层
+（WP1）必须排在 WP2a 前面。WP5a 不需要任何引擎，也不需要等样例文件，可以和第一阶段并行。
 
 ## 6. 已确认的事项（2026-11-09，仓库主人答复）
 
@@ -82,8 +84,9 @@ WP2 是仓库主人点名的优先项。WP3、WP4、WP5a 可以并行。WP5a 不
 2. **理想矩阵来源**：CST Filter Designer 3D。可以导出 `.fil` 文件，整个理想矩阵
    也能读取并单独导出。
 3. **dsh = DeepSeek Harness**（`deepseek-ai/deepseek-harness`，MIT，开发者预览版）。
-   它自带实验性的 Claude Code / Codex hook 兼容桥，适配方案见 HOOKS_SPEC §4.3。
+   它自带实验性的 Claude Code / Codex hook 兼容桥，适配方案见 HOOKS_SPEC §4.3。**以后再做。**
 4. 三家引擎在同一台 Windows 机器上：ADS 2027、HFSS 2024 R2、CST 2024。
+5. **优先级**：第一步让 Codex 自己完成自己的 hook 适配（第一阶段，见 §5）。
 
 ## 7. 仍待仓库主人提供
 
@@ -93,4 +96,4 @@ WP2 是仓库主人点名的优先项。WP3、WP4、WP5a 可以并行。WP5a 不
 2. 谐振模式：TE01δ 还是 TM 模或其它？只影响初值估算和报告说明，不影响主流程。
 3. 本机安装路径写进环境变量（不进仓库）：`RFAUTO_CST_DIR`、`ANSYSEM_ROOT242`
    （AEDT 2024 R2 的惯例变量）、`RFAUTO_HPEESOF_DIR`。
-4. 本机 Codex 和 dsh 的版本，以及 dsh 启动时使用的 `cordis.yml` 在哪里（WP2 安装器要往里加 hook 桥）。
+4. 本机 Codex 的版本：WP2a 由 Codex 自己记录即可。dsh 的版本和 `cordis.yml` 位置等做 WP2c 时再提供。
